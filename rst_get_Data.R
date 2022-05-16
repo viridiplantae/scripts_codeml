@@ -1,28 +1,60 @@
+## Procesamiento de datos del archivo rst
+## por Viri J. Quintero, email: viridiana.j.quintero@gmail.com
+
+# Funci贸n para extraer el 谩rbol con nodos
+rst_get_tree <- function(file, output){
+  dis_tree <- (grep("tree with node labels for Rod Page's TreeView", file))
+  write(file[(dis_tree +1)], file = output)
+}
+# Funci贸n para obtener los valores referentes a un nodo
 rst_get_node <- function(file, node){
-  #
-  rst_file <- readLines(file)
+  # Se obtienen cuatro archivos de esta funci贸n, el primero es un archivo fasta
+  # con la secuencia ancestral reconstruida correspondiente al nodo de inter茅s.
+  # El segundo archivo es una tabla (TSV) que incluye el amino谩cido de cada
+  # posici贸n reconstruido junto con la probabilidad correspondiente, seguido 
+  # de la mejor probabilidad. El amino谩cido para el peor caso plausible y la 
+  # probabilidad de este sitio.
+  # El tercer archivo es un archivo fasta con la secuencia correspondiente al
+  # peor caso plausible.
+  # El cuarto archivo muestra el error esperado o sitios err贸neamente esperados
+  # as铆 como el n煤mero de sitios ambiguos reconstruidos.
   
+  # Archivo
+  rst_file <- file
+  
+  # Obtener posiciones y valores para trabajar
   dis_node <- (grep("Prob distribution at node", rst_file))
   pos_node <- (grep((paste("Prob distribution at node ", node, sep = "")), rst_file))
   num_int <- dis_node[grep(pos_node, dis_node)]+4
   num_sec <- dis_node[grep(pos_node, dis_node) +1]-2
   num_site <- num_sec - num_int
   
-  #variable para guardar datos y encabezado
+  # Variable para guardar datos y encabezado
   out_file <- character(length = num_site+2)
-  out_file[1] <- paste("Pos", "A", "R", "N", "D", "L", "Q", "E", "G", "H",
-                       "I", "L", "K", "M", "F", "P", "S", "T", "W", "Y",
-                       "P", sep="  ")
+  out_prob <- 0
+  amn_code <- c("A", "R", "N", "D", "L", "Q", "E", "G", "H", "I",
+                "L", "K", "M", "F", "P", "S", "T", "W", "Y", "P")
+  out_file[1] <- paste("Pos", "A", "R", "N", "D", "L", "Q", "E", "G", "H", 
+                       "I", "L", "K", "M", "F", "P", "S", "T", "W", "Y", "P", 
+                       "Best_prob", "Worst_case", "Worst_prob", sep="  ")
   
-  #Secuencia de amino醕idos del nodo de inter閟
+  # Secuencia de amino谩cidos del nodo de inter茅s
   for_serc <- (paste("node #", node, sep = ""))
   pos_sec <- (grep(for_serc, rst_file))
   pos_fast <- regexpr(for_serc, rst_file[pos_sec])
-    sec_ance <- substr(rst_file[pos_sec], attr(pos_fast, "match.length")+1, nchar(rst_file[pos_sec]))
+  sec_ance <- substr(rst_file[pos_sec], attr(pos_fast, "match.length")+1, nchar(rst_file[pos_sec]))
   sec_ance <- gsub(" ", "", sec_ance)
   
-  #Ciclo for para extraer la informaci髇
+  # Guardar archivo fasta
+  nod_fast <- character(length = 2)
+  nod_fast[1] <-paste(">nodo_", node, sep="")
+  nod_fast[2] <- sec_ance
+  bad_fast <- character(length = 2)
+  bad_fast[1] <-paste(">nodo_", node, "_peor_caso_plausible", sep="")
+  
+  # Ciclo for para extraer la informaci贸n
   num_cont <- 0
+  amb_site <- 0
   for (i in (num_int):(num_sec)){
     num_cont <- num_cont + 1
     sec_site <- substr(sec_ance, num_cont, num_cont)
@@ -47,15 +79,66 @@ rst_get_node <- function(file, node){
     amino_W <- substr(sec_line, (unlist(regexpr("W\\(", sec_line))+2), (unlist(regexpr("W\\(", sec_line))+6))
     amino_Y <- substr(sec_line, (unlist(regexpr("Y\\(", sec_line))+2), (unlist(regexpr("Y\\(", sec_line))+6))
     amino_V <- substr(sec_line, (unlist(regexpr("V\\(", sec_line))+2), (unlist(regexpr("V\\(", sec_line))+6))
+    
+    all_amino <- as.numeric(c(amino_A, amino_R, amino_N, amino_D, amino_L, amino_Q, 
+                              amino_E, amino_G, amino_H, amino_I, amino_L, amino_K, amino_M, 
+                              amino_F, amino_P, amino_S, amino_T, amino_W, amino_Y, amino_V)) 
+    
+    # Probabilidad mayor
+    pos_1 <- which.max(all_amino)
+    pro_1 <- all_amino[pos_1]
+    all_amino[pos_1] <- 0
+    # Segunda probabilidad
+    pos_2 <- which.max(all_amino)
+    pro_2 <- all_amino[pos_2]
+    # Peor caso plausible
+    if (pro_1 & pro_2 >= 0.2){
+      amb_site <- amb_site +1
+      bad_site <- amn_code[pos_2]
+      bad_prob <- pro_2
+    } else {
+      bad_site <- amn_code[pos_1]
+      bad_prob <- pro_1
+    }
+    bad_fast[2] <- paste(bad_fast[2], bad_site, sep = "")
+    
     out_file[num_cont+1] <- paste(sec_site, amino_A, amino_R, amino_N, amino_D, amino_L, amino_Q, 
                                   amino_E, amino_G, amino_H, amino_I, amino_L, amino_K, amino_M, 
-                                  amino_F, amino_P, amino_S, amino_T, amino_W, amino_Y, amino_P, sep="  ")
+                                  amino_F, amino_P, amino_S, amino_T, amino_W, amino_Y, amino_V,
+                                  pro_1, bad_site, bad_prob, sep="  ")
+    out_prob <- out_prob +(1 - pro_1)
   }
   
-  #Guardar archivo 
-  out_name <- paste("nodo_", node, ".tsv", sep="")
-  write(out_file[out_file != ""], file = out_name)
+  # Error esperado o sitios err贸neamente esperados
+  
+  err_site <- out_prob / (length(num_site)+1)
+  err_file <- paste("El error esperado o sitios erroneamente esperados es igual a: ", as.character(err_site), 
+                    "\nEl n煤mero de sitios ambiguos es igual a: ", amb_site, sep = "")
+  
+  # Guardar archivo 
+  out_nam1 <- paste("nodo_", node, ".tsv", sep="")
+  out_nam2 <- paste("error_", node, ".txt", sep="")
+  out_fas1 <- paste("nodo_", node, ".fas", sep="")
+  out_fas2 <- paste("peor_caso_", node, ".fas", sep="")
+  write(out_file[out_file != ""], file = out_nam1)
+  write(err_file[err_file != ""], file = out_nam2)
+  write(nod_fast[nod_fast != ""], file = out_fas1)
+  write(bad_fast[bad_fast != ""], file = out_fas2)
 }
 
-#rst_get_node(file, #node)
-rst_get_node("rst.txt", 385)
+## MODO DE USO
+## Es necesario cargar a una variable el contenido del archivo rst
+## posteriormente introducir esa variable a las distintas funciones
+
+# Leer archivo rst
+rst_file <- readLines("rst")
+
+# Obtener 谩rbol con nodos
+# La funci贸n recibe el archivo rst y el nombre con el que se desea guardar
+# rst_get_tree(file, output)
+rst_get_tree(rst_file, "anc_node.tre")
+
+# Obtener valores referentes al nodo de inter茅s
+# La funci贸n recibe el archivo rst y el nodo de inter茅s.
+# rst_get_node(file, #node)
+rst_get_node(rst_file, 385)
